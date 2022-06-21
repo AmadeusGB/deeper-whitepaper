@@ -625,6 +625,47 @@ Deeper 使用 HotStuff [74]作为其状态机复制(SMR)框架。HotSuff 是第�
 
 在Tendermint和PBFT这些共识算法中，每一个区块达成共识需要2轮。Hotstuff通过增加一轮共识，同时借助于门限签名可以把领导节点变更(leader change)的复杂度变成线性的，并且保证出块速度等于实际的网络延迟。相比之下，PBFT的领导节点变更复杂度是$O(n^2)$，而Tendermint的出块速度取决与系统定义的参数，没有根据网络速度达到最优。Deeper链提供了用户隐私保护功能，因此除了需要防止针对公共区块链的女巫(Sybil)攻击外，节点还可能会遭遇政府和服务提供商有针对性的禁令， 这可能导致领导节点被封锁。由于HotStuff发起领导者变更是线性复杂度，这种单点故障不会显著降低网络运行速度。
 
+\subsubsection{节点甄选}
+在任何人都可以加入的系统中，为了保证网络的安全性，验证节点需要每隔一定时间重新选举。这就是所谓的委员会轮换。委员会轮换的时间不能够太长，也就是需要在网络大部分节点被渗透之前就进行选举。只要在两次选举的时间内，攻击者控制的节点不超过总数的$1/3$即可。
+
+对于委员会轮换，Deeper使用基于VDF的随机信标(random beacon) \cite{boneh2018verifiable}。VDF与VRF类似，VRF是一种输出不可预测的加密函数，它还可以生成一个可用于验证VRF计算正确性的证明。相比之下，VDF 需要大量的计算步骤，因此任何机器进行VDF的计算时间大于一个系统设定的下限。而验证VDF计算结果则要快得多。通过VDF，我们在随机数的输入和输出
+之间施加了一定的延迟，这样可以确保任何人都无法提前预知到随机数。
+
+在第$k$轮中，基于$k-2$轮的门限签名来作为VDF的输入，这里k代表纪元(ePoCrh)的最后一个区块。VDF的计算延迟时间大约设定为需要两轮时间。这样，恶意领导节点没有足够时间提前得到VDF输出(决定了委员会选举的随机数)，从而操纵委员会的选举。委员会的选举参见算法 \ref{alg:vdf-selection}.
+
+
+
+\begin{algorithm} [hh]
+\caption{Algorithm for committee members selection}
+\label{alg:vdf-selection}
+\begin{algorithmic} [1]
+\State $R$ -- the value of the randomness beacon in the current ePoCrh;
+\State $H(x)$ -- a hash function;
+\State $n$ -- the total number of staking validators;
+\State $m$ -- the total number of selected validators;
+\State $W_i$ -- the weight of the $i$-th validator in consensus;
+\State $TW$ -- the sum of all validator weights in consensus;
+\State
+\State $C \leftarrow \{\}$
+\State $S \leftarrow 0$
+\For{$k \in \{0, \ldots, m-1\}$}
+    \State $V \leftarrow H(R||k) \% (TW-S)$
+    \State $P \leftarrow 0$
+    \For{$i \in \{0, \ldots, n-1\} / C$}
+        \State $P \leftarrow P + W_i$
+        \If{$V < P$}
+            \State $C[k] \leftarrow i$
+            \State $S \leftarrow S + W_i$
+            \State break
+        \EndIf
+    \EndFor
+\EndFor
+\State \Return $C$
+\end{algorithmic}
+\end{algorithm}
+
+此算法意味着每个验证节点在选举时候不会被重复选中，并且每个验证节点被选中的概率与它们的权重成正比。委员会选出后，里面的节点将轮流作为领导节点。每个时代大概出块17,300 (即假设每块需要5秒时间，24小时的出块总量）。
+
 \subsection{信用证明}
 Deeper 网络由两层组成。顶层包含数百个验证节点，它们不断生成新的块。而 Deeper 层是由数百万个 Deeper 网络设备组成的。信用证明允许 Deeper 的网络设备通过共享带宽来获得新的代币。每个设备将与一个帐户相关联。设备分享
 的带宽越多，相应帐户获得的信用分就越高。每个设备可以把它的信用评分委托(delegate)给验
